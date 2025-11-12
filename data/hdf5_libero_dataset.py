@@ -116,14 +116,13 @@ class HDF5VLADataset:
         """
         with h5py.File(file_path, 'r') as f:
             # LIBERO dataset structure: data/demo_X/
-            # 在demo_X中随机选择一个demo
+            # 在demo_X中随机选择一个demo 遍历
             demo_keys = list(f['data'].keys())  # convert to list
             demo_key = np.random.choice(demo_keys)
             demo = f['data'][demo_key]
             joint_states = demo['obs']['joint_states'][:]
             gripper_states = demo['obs']['gripper_states'][:]
-            # actions 6EEF+1gripper
-            actions = demo['actions'][:]
+
             # Concatenate joint states and gripper states 7DoF+2gripper
             qpos = np.concatenate([joint_states, gripper_states], axis=1)
             num_steps = qpos.shape[0]
@@ -131,7 +130,7 @@ class HDF5VLADataset:
             if num_steps < 128:
                 return False, None
 
-            # [Optional] We skip the first few still steps
+            # [Optional] We skip the first few still steps TODO
             EPS = 1e-2
             # Get the idx of the first qpos whose delta exceeds the threshold
             qpos_delta = np.abs(qpos - qpos[0:1])
@@ -141,11 +140,12 @@ class HDF5VLADataset:
             else:
                 raise ValueError("Found no qpos that exceeds the threshold.")
 
-            # We randomly sample a timestep
+            # We randomly sample a timestep TODO
             step_id = np.random.randint(first_idx-1, num_steps)
 
             # TODO: add instruction
             # Load the instruction
+            '''
             dir_path = os.path.dirname(file_path)
             with open(os.path.join(dir_path, 'expanded_instruction_gpt-4-turbo.json'), 'r') as f_instr:
                 instruction_dict = json.load(f_instr)
@@ -157,6 +157,18 @@ class HDF5VLADataset:
             instruction = instruction_dict[instruction_type]
             if isinstance(instruction, list):
                 instruction = np.random.choice(instruction)
+            '''
+            # Extract instruction from filename
+            # Example: "KITCHEN_SCENE3_turn_on_the_stove_and_put_the_moka_pot_on_it_demo.hdf5"
+            # -> "turn on the stove and put the moka pot on it"
+            task_name = os.path.basename(file_path).replace('_demo.hdf5', '')
+            parts = task_name.split('_')
+            # Find where the actual task description starts (after SCENE#)
+            instruction = task_name.replace('_', ' ')
+            for i, part in enumerate(parts):
+                if part.startswith('SCENE') or part.startswith('scene'):
+                    instruction = ' '.join(parts[i+1:])
+                    break
             # You can also use precomputed language embeddings (recommended)
             # instruction = "path/to/lang_embed.pt"
 
@@ -168,14 +180,14 @@ class HDF5VLADataset:
                 "instruction": instruction
             }
 
-            # Max-min normalization for the gripper states (last 2 dimensions)
+            # Max-min normalization for the gripper states (last 2 dimensions) TODO: max-min qpos correct
             qpos_min = -0.04245
             qpos_max = 0.05185
             qpos[..., -2:] = (qpos[..., -2:] - qpos_min) / \
                 (qpos_max - qpos_min)
 
             # Extract actions: 6D EEF velocities + 1D gripper velocity
-            target_qpos = actions[step_id:step_id+self.CHUNK_SIZE]
+            target_qpos = demo['actions'][step_id:step_id+self.CHUNK_SIZE]
 
             # Parse the state and action
             state = qpos[step_id:step_id+1]
@@ -208,9 +220,8 @@ class HDF5VLADataset:
             state_std = fill_in_state(state_std)
             state_mean = fill_in_state(state_mean)
             state_norm = fill_in_state(state_norm)
-            # If action's format is different from state's,
-            # you may implement fill_in_action()
 
+            # Fill the action into the unified vector 都认为是velocity
             def fill_in_action(values):
                 UNI_ACTION_INDICES = [
                     STATE_VEC_IDX_MAPPING["eef_vel_x"],
@@ -220,19 +231,18 @@ class HDF5VLADataset:
                     STATE_VEC_IDX_MAPPING["eef_angular_vel_pitch"],
                     STATE_VEC_IDX_MAPPING["eef_angular_vel_yaw"],
                 ] + [
-                    STATE_VEC_IDX_MAPPING["gripper_open_vel"]
+                    STATE_VEC_IDX_MAPPING["gripper_open_vel"]  # TODO
                 ]
                 uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
                 uni_vec[..., UNI_ACTION_INDICES] = values
                 return uni_vec
             actions = fill_in_action(actions)
 
-            # Parse the images libero的图片是numpy数组
+            # Parse the images libero的图片是numpy数组, TODO:对比原始数据集的图片格式
             def parse_img(key):
                 # Check if the key exists in the demo
                 if key not in demo['obs']:
                     return np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0))
-
                 imgs = []
                 for i in range(max(step_id-self.IMG_HISORY_SIZE+1, 0), step_id+1):
                     img = demo['obs'][key][i]

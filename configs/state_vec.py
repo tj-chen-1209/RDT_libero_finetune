@@ -1,5 +1,5 @@
 STATE_VEC_IDX_MAPPING = {
-    # [0, 10): right arm joint positions
+    # [0, 10): right arm joint positions TODO:物理含义 动作空间
     **{
         'arm_joint_{}_pos'.format(i): i for i in range(10)
     },
@@ -13,7 +13,7 @@ STATE_VEC_IDX_MAPPING = {
     **{
         'right_gripper_joint_{}_pos'.format(i): i + 10 for i in range(5)
     },
-    'gripper_open': 10, # alias of right_gripper_joint_0_pos
+    'gripper_open': 10,  # alias of right_gripper_joint_0_pos
     'right_gripper_open': 10,
     # [15, 25): right arm joint velocities
     **{
@@ -29,7 +29,7 @@ STATE_VEC_IDX_MAPPING = {
     **{
         'right_gripper_joint_{}_vel'.format(i): i + 25 for i in range(5)
     },
-    'gripper_open_vel': 25, # alias of right_gripper_joint_0_vel
+    'gripper_open_vel': 25,  # alias of right_gripper_joint_0_vel
     'right_gripper_open_vel': 25,
     # [30, 33): right end effector positions
     'eef_pos_x': 30,
@@ -65,7 +65,7 @@ STATE_VEC_IDX_MAPPING = {
     'right_eef_angular_vel_pitch': 43,
     'eef_angular_vel_yaw': 44,
     'right_eef_angular_vel_yaw': 44,
-    # [45, 50): reserved 
+    # [45, 50): reserved
     # [50, 60): left arm joint positions
     **{
         'left_arm_joint_{}_pos'.format(i): i + 50 for i in range(10)
@@ -74,7 +74,7 @@ STATE_VEC_IDX_MAPPING = {
     **{
         'left_gripper_joint_{}_pos'.format(i): i + 60 for i in range(5)
     },
-    'left_gripper_open': 60, # alias of left_gripper_joint_0_pos
+    'left_gripper_open': 60,  # alias of left_gripper_joint_0_pos
     # [65, 75): left arm joint velocities
     **{
         'left_arm_joint_{}_vel'.format(i): i + 65 for i in range(10)
@@ -83,7 +83,7 @@ STATE_VEC_IDX_MAPPING = {
     **{
         'left_gripper_joint_{}_vel'.format(i): i + 75 for i in range(5)
     },
-    'left_gripper_open_vel': 75, # alias of left_gripper_joint_0_vel
+    'left_gripper_open_vel': 75,  # alias of left_gripper_joint_0_vel
     # [80, 83): left end effector positions
     'left_eef_pos_x': 80,
     'left_eef_pos_y': 81,

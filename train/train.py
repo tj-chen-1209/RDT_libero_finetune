@@ -153,6 +153,21 @@ def train(args, logger):
     ):
         logger.info("Constructing model from pretrained checkpoint.")
         rdt = RDTRunner.from_pretrained(args.pretrained_model_name_or_path)
+        # TODO：使用PEFT库，加载LoRA权重
+        '''
+        from peft import LoraConfig, get_peft_model
+        lora_config = LoraConfig(
+            task_type="OTHER",
+            inference_mode=False,
+            r=8,
+            lora_alpha=32,
+            target_modules=["qkv", "q", "kv", "proj",  # 注意力层
+                            "fc1", "fc2"],  # 全连接层
+            lora_dropout=0.1
+        )
+        rdt = get_peft_model(rdt, lora_config)
+        rdt.print_trainable_parameters()
+        '''
     else:
         logger.info("Constructing model from provided config.")
         # 计算图像条件长度
