@@ -35,11 +35,28 @@ class HDF5VLADataset:
         self.STATE_DIM = config['common']['state_dim']
 
         # Get each episode's len
+        '''
         episode_lens = []
         for file_path in self.file_paths:
             valid, res = self.parse_hdf5_file_state_only(file_path)
             _len = res['state'].shape[0] if valid else 0
             episode_lens.append(_len)
+        self.episode_sample_weights = np.array(
+            episode_lens) / np.sum(episode_lens)
+        '''
+        # siqi change
+        self.episode_paths = []  # 用于存储每个 demo_X 路径
+        for file_path in self.file_paths:
+            with h5py.File(file_path, 'r') as f:
+                demo_keys = list(f['data'].keys())  # 获取 demo_X 名称
+            for demo_key in demo_keys:
+                demo = f['data'][demo_key]
+                num_steps = demo['actions'].shape[0]
+
+                if num_steps >= 128:  # 丢弃太短的 demo
+                    self.episode_paths.append((file_path, demo_key, num_steps))
+        episode_lens = [episode[2]
+                        for episode in self.episode_paths]  # 获取每个 demo_X 的长度
         self.episode_sample_weights = np.array(
             episode_lens) / np.sum(episode_lens)
 
@@ -62,6 +79,7 @@ class HDF5VLADataset:
         Returns:
            sample (dict): a dictionary containing the training sample.
         """
+        '''
         while True:
             if index is None:
                 file_path = np.random.choice(
@@ -74,14 +92,29 @@ class HDF5VLADataset:
                 return sample
             else:
                 index = np.random.randint(0, len(self.file_paths))
+        '''
+        while True:
+            if index is None:
+                demo_path = np.random.choice(
+                    self.episode_paths, p=self.episode_sample_weights)
+            else:
+                demo_path = self.episode_paths[index]
 
-    def parse_hdf5_file(self, file_path):
+            file_path, demo_key, _ = demo_path  # 获取文件路径和 demo_key
+            valid, sample = self.parse_hdf5_file(
+                file_path, demo_key, state_only=state_only)
+            if valid:
+                return sample
+            else:
+                index = np.random.randint(0, len(self.episode_paths))
+
+    def parse_hdf5_file(self, file_path, demo_key):
         """[Modify] Parse a hdf5 file to generate a training sample at
             a random timestep.
 
         Args:
             file_path (str): the path to the hdf5 file
-
+            demo_key (str): the key of the demo 
         Returns:
             valid (bool): whether the episode is valid, which is useful for filtering.
                 If False, this episode will be dropped.
@@ -116,9 +149,7 @@ class HDF5VLADataset:
         """
         with h5py.File(file_path, 'r') as f:
             # LIBERO dataset structure: data/demo_X/
-            # 在demo_X中随机选择一个demo 遍历
-            demo_keys = list(f['data'].keys())  # convert to list
-            demo_key = np.random.choice(demo_keys)
+            # 在demo_X中随机选择一个demo 遍历 TODO
             demo = f['data'][demo_key]
             joint_states = demo['obs']['joint_states'][:]
             gripper_states = demo['obs']['gripper_states'][:]
@@ -127,8 +158,8 @@ class HDF5VLADataset:
             qpos = np.concatenate([joint_states, gripper_states], axis=1)
             num_steps = qpos.shape[0]
             # [Optional] We drop too-short episode
-            if num_steps < 128:
-                return False, None
+            # if num_steps < 128:
+            #     return False, None
 
             # [Optional] We skip the first few still steps TODO
             EPS = 1e-2
@@ -231,7 +262,7 @@ class HDF5VLADataset:
                     STATE_VEC_IDX_MAPPING["eef_angular_vel_pitch"],
                     STATE_VEC_IDX_MAPPING["eef_angular_vel_yaw"],
                 ] + [
-                    STATE_VEC_IDX_MAPPING["gripper_open_vel"]  # TODO
+                    STATE_VEC_IDX_MAPPING["gripper_open"]  # TODO
                 ]
                 uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
                 uni_vec[..., UNI_ACTION_INDICES] = values
@@ -299,12 +330,12 @@ class HDF5VLADataset:
                 "cam_right_wrist_mask": cam_right_wrist_mask
             }
 
-    def parse_hdf5_file_state_only(self, file_path):
+    def parse_hdf5_file_state_only(self, file_path, demo_key):
         """[Modify] Parse a hdf5 file to generate a state trajectory.
 
         Args:
             file_path (str): the path to the hdf5 file
-
+            demo_key (str): the key of the demo 
         Returns:
             valid (bool): whether the episode is valid, which is useful for filtering.
                 If False, this episode will be dropped.
@@ -316,8 +347,6 @@ class HDF5VLADataset:
         """
         with h5py.File(file_path, 'r') as f:
             # LIBERO dataset structure: data/demo_X/
-            demo_keys = list(f['data'].keys())
-            demo_key = np.random.choice(demo_keys)
             demo = f['data'][demo_key]
             joint_states = demo['obs']['joint_states'][:]
             gripper_states = demo['obs']['gripper_states'][:]
@@ -326,8 +355,8 @@ class HDF5VLADataset:
             qpos = np.concatenate([joint_states, gripper_states], axis=1)
             num_steps = qpos.shape[0]
             # [Optional] We drop too-short episode
-            if num_steps < 128:
-                return False, None
+            # if num_steps < 128:
+            #     return False, None
 
             # [Optional] We skip the first few still steps
             EPS = 1e-2
@@ -373,7 +402,7 @@ class HDF5VLADataset:
                     STATE_VEC_IDX_MAPPING["eef_angular_vel_pitch"],
                     STATE_VEC_IDX_MAPPING["eef_angular_vel_yaw"],
                 ] + [
-                    STATE_VEC_IDX_MAPPING["gripper_open_vel"]
+                    STATE_VEC_IDX_MAPPING["gripper_open"]
                 ]
                 uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
                 uni_vec[..., UNI_ACTION_INDICES] = values
