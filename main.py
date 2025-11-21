@@ -274,6 +274,44 @@ def parse_args(input_args=None):
             " https://pytorch.org/docs/stable/generated/torch.optim.Optimizer.zero_grad.html"
         ),
     )
+    
+    # LoRA related arguments
+    parser.add_argument(
+        "--use_lora",
+        action="store_true",
+        default=False,
+        help="Enable LoRA (Low-Rank Adaptation) for parameter-efficient fine-tuning.",
+    )
+    parser.add_argument(
+        "--lora_rank",
+        type=int,
+        default=32,
+        help="The rank of LoRA matrices. Higher rank = more parameters but better expressiveness.",
+    )
+    parser.add_argument(
+        "--lora_alpha",
+        type=int,
+        default=64,
+        help="LoRA alpha parameter for scaling. Typically set to 2x of lora_rank.",
+    )
+    parser.add_argument(
+        "--lora_dropout",
+        type=float,
+        default=0.1,
+        help="Dropout probability for LoRA layers.",
+    )
+    parser.add_argument(
+        "--lora_target_modules",
+        type=str,
+        default="all",
+        choices=["all", "attention", "mlp"],
+        help=(
+            "Which modules to apply LoRA to. "
+            "'all': attention + MLP (recommended), "
+            "'attention': only attention layers, "
+            "'mlp': only MLP layers."
+        ),
+    )
 
     parser.add_argument('--dataset_type', 
         type=str, 

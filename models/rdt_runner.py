@@ -12,11 +12,7 @@ from models.hub_mixin import CompatiblePyTorchModelHubMixin
 from models.rdt.model import RDT
 
 
-class RDTRunner(
-    nn.Module,
-    CompatiblePyTorchModelHubMixin,
-    repo_url="https://huggingface.co/robotics-diffusion-transformer/rdt-1b"
-):
+class RDTRunner(nn.Module, CompatiblePyTorchModelHubMixin):
     """
     扩散模型训练和推理封装类
 
@@ -26,6 +22,9 @@ class RDTRunner(
     3. 实现条件采样（反向去噪过程）
     4. 管理噪声调度器（训练用DDPM，推理用DPM-Solver）
     """
+    
+    # HuggingFace Hub 相关配置
+    _repo_url = "https://huggingface.co/robotics-diffusion-transformer/rdt-1b"
 
     def __init__(self, *, action_dim, pred_horizon, config,
                  lang_token_dim, img_token_dim, state_token_dim,

@@ -153,21 +153,40 @@ def train(args, logger):
     ):
         logger.info("Constructing model from pretrained checkpoint.")
         rdt = RDTRunner.from_pretrained(args.pretrained_model_name_or_path)
-        # TODO：使用PEFT库，加载LoRA权重
-        '''
-        from peft import LoraConfig, get_peft_model
-        lora_config = LoraConfig(
-            task_type="OTHER",
-            inference_mode=False,
-            r=8,
-            lora_alpha=32,
-            target_modules=["qkv", "q", "kv", "proj",  # 注意力层
-                            "fc1", "fc2"],  # 全连接层
-            lora_dropout=0.1
-        )
-        rdt = get_peft_model(rdt, lora_config)
-        rdt.print_trainable_parameters()
-        '''
+        
+        # 应用 LoRA (如果启用)
+        if args.use_lora:
+            from peft import LoraConfig, get_peft_model
+            
+            # 根据用户选择定义目标模块
+            if args.lora_target_modules == "all":
+                target_modules = [
+                    "attn.qkv", "attn.proj",           # 自注意力
+                    "cross_attn.q", "cross_attn.kv", "cross_attn.proj",  # 交叉注意力
+                    "ffn.fc1", "ffn.fc2"               # FFN
+                ]
+            elif args.lora_target_modules == "attention":
+                target_modules = [
+                    "attn.qkv", "attn.proj", 
+                    "cross_attn.q", "cross_attn.kv", "cross_attn.proj"
+                ]
+            elif args.lora_target_modules == "mlp":
+                target_modules = ["ffn.fc1", "ffn.fc2"]
+            
+            lora_config = LoraConfig(
+                r=args.lora_rank,
+                lora_alpha=args.lora_alpha,
+                target_modules=target_modules,
+                lora_dropout=args.lora_dropout,
+                bias="none"
+                # 不指定 task_type - RDT 是扩散变换器，不属于标准任务类型
+            )
+            
+            rdt = get_peft_model(rdt, lora_config)
+            rdt.print_trainable_parameters()
+            logger.info(f"LoRA enabled: rank={args.lora_rank}, alpha={args.lora_alpha}, "
+                       f"target_modules={args.lora_target_modules}")
+            logger.info(f"Targeting these module patterns: {target_modules}")
     else:
         logger.info("Constructing model from provided config.")
         # 计算图像条件长度
@@ -218,7 +237,13 @@ def train(args, logger):
                 model_to_save = model.module if hasattr(
                     model, "module") else model  # type: ignore
                 if isinstance(model_to_save, type(accelerator.unwrap_model(rdt))):
-                    model_to_save.save_pretrained(output_dir)
+                    if args.use_lora:
+                        # 保存LoRA权重（轻量级，只有几MB）
+                        logger.info(f"Saving LoRA weights to {output_dir}")
+                        model_to_save.save_pretrained(output_dir)
+                    else:
+                        # 保存完整模型
+                        model_to_save.save_pretrained(output_dir)
 
     accelerator.register_save_state_pre_hook(save_model_hook)
 

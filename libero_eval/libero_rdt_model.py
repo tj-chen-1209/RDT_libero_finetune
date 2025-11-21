@@ -17,6 +17,7 @@ LIBERO_STATE_INDICES = [
 ] + [
     STATE_VEC_IDX_MAPPING[f"gripper_joint_{i}_pos"] for i in range(2)
 ]
+
 LIBERO_ACTION_INDICES = [
     STATE_VEC_IDX_MAPPING["eef_vel_x"],
     STATE_VEC_IDX_MAPPING["eef_vel_y"],
@@ -33,7 +34,27 @@ def create_model(args, pretrained, **kwargs):
     model = RoboticDiffusionTransformerModel(args, **kwargs)
     if pretrained is not None:
         model.load_pretrained_weights(pretrained)
+
     return model
+
+# LoRA 相关代码 到时候测试
+# def create_model(args, pretrained, lora_weights_path=None, **kwargs):
+#     model = RoboticDiffusionTransformerModel(args, **kwargs)
+#     if pretrained is not None:
+#         model.load_pretrained_weights(pretrained)
+    
+#     # 如果提供了LoRA权重，加载它们
+#     if lora_weights_path is not None:
+#         from peft import PeftModel
+#         print(f"Loading LoRA weights from {lora_weights_path}")
+#         model.policy = PeftModel.from_pretrained(
+#             model.policy, 
+#             lora_weights_path,
+#             is_trainable=False
+#         )
+#         print("LoRA weights loaded successfully")
+    
+#     return model
 
 class RoboticDiffusionTransformerModel(object):
     """A wrapper for the RDT model, which handles
@@ -269,7 +290,6 @@ class RoboticDiffusionTransformerModel(object):
     def _unformat_action_to_joint(self, action):
         action_indices = LIBERO_ACTION_INDICES
         joints = action[:, :, action_indices]
-        
         
         # 对 gripper 动作进行二值化（最后一个维度）
         # gripper_open: 负值表示闭合 (-1)，正值表示打开 (1)

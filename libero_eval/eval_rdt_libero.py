@@ -16,7 +16,7 @@ from libero.libero import get_libero_path
 from libero.libero.benchmark import get_benchmark_dict
 from libero.libero.envs import OffScreenRenderEnv
 from libero_rdt_model import create_model, RoboticDiffusionTransformerModel
-
+from libero.libero.utils.video_utils import VideoWriter 
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -25,6 +25,12 @@ def parse_args():
     parser.add_argument("--pretrained-path", type=str, required=True, help="Path to pretrained model")
     parser.add_argument("--dataset-name", type=str, default="libero_10", 
                         choices=["libero_10", "libero_90"], help="Dataset name")
+    # 添加视频参数
+    parser.add_argument("--save-videos", action="store_true", help="Save evaluation videos")
+    parser.add_argument("--video-dir", type=str, default="outs/videos", help="Directory to save videos")
+    # 添加LoRA参数
+    parser.add_argument("--lora-weights", type=str, default=None, 
+                        help="Path to LoRA weights (if using LoRA fine-tuned model)")
     return parser.parse_args()
 
 
@@ -93,7 +99,8 @@ def main():
         dtype=torch.bfloat16,
         pretrained=args.pretrained_path,
         pretrained_text_encoder_name_or_path=pretrained_text_encoder_name_or_path,
-        pretrained_vision_encoder_name_or_path=pretrained_vision_encoder_name_or_path
+        pretrained_vision_encoder_name_or_path=pretrained_vision_encoder_name_or_path,
+        # lora_weights_path=args.lora_weights  # 新增：支持LoRA权重加载
     )
     
     # 2. 获取任务信息
@@ -116,7 +123,7 @@ def main():
     
     # 3. 加载语言嵌入
     text_embed = load_language_embedding(task_name, args.dataset_name, policy)
-    
+
     # 4. 创建环境
     env = OffScreenRenderEnv(
         bddl_file_name=bddl_file,
@@ -135,113 +142,139 @@ def main():
     base_seed = 20241201
     import tqdm
     
-    for episode in tqdm.trange(total_episodes):
-        # 使用不同的初始状态
-        init_state_id = episode % len(init_states)
-        
-        env.seed(episode + base_seed)
-        obs = env.reset()
-        env.set_init_state(init_states[init_state_id])
-        
-        policy.reset()
-
-        # 维护两个图像历史窗口
-        agentview_window = deque(maxlen=2)
-        eye_in_hand_window = deque(maxlen=2)
-
-        # 获取初始图像
-        agentview_img = obs['agentview_image']
-        eye_in_hand_img = obs['robot0_eye_in_hand_image']
-
-        # 用第一帧填充历史（与训练一致）
-        for _ in range(2):
-            agentview_window.append(agentview_img)
-            eye_in_hand_window.append(eye_in_hand_img)
-
-        # 获取 proprio 状态
-        joint_states = obs['robot0_joint_pos']
-        gripper_states = obs['robot0_gripper_qpos']
-        proprio = torch.from_numpy(
-            np.concatenate([joint_states, gripper_states], axis=-1)
-        ).float()
-
-        global_steps = 0
-        done = False
-        task_success = False
-
-        # 🎯 重新规划频率：建议从1开始测试
-        REPLAN_FREQ = 1  # 每1步重新预测（推荐从这个开始）
-        
-        while global_steps < MAX_EPISODE_STEPS and not done:
-            # 准备图像输入
-            image_arrs = []
-            for i in range(2):  # img_history_size = 2
-                image_arrs.append(agentview_window[i])      # 外部相机
-                image_arrs.append(eye_in_hand_window[i])    # 右手腕
-                image_arrs.append(None)                     # 左手腕（LIBERO 没有）
+    # 创建视频保存目录
+    video_folder = os.path.join(
+        args.video_dir,
+        f"{args.dataset_name}_task{args.task_id}"
+    )
+    
+    # 使用 VideoWriter 上下文管理器
+    with VideoWriter(video_folder, save_video=args.save_videos, fps=30, single_video=False) as video_writer:
+        for episode in tqdm.trange(total_episodes):
+            # 使用不同的初始状态
+            init_state_id = episode % len(init_states)
             
-            images = [Image.fromarray(arr) if arr is not None else None
-                    for arr in image_arrs]
+            env.seed(episode + base_seed)
+
+            obs = env.reset()
+            env.set_init_state(init_states[init_state_id])
+
+            policy.reset()
+            video_writer.reset()  # 重置视频缓冲
+
+            # 维护两个图像历史窗口
+            agentview_window = deque(maxlen=2)
+            eye_in_hand_window = deque(maxlen=2)
+
+            # 获取初始图像
+            agentview_img = obs['agentview_image']
+            eye_in_hand_img = obs['robot0_eye_in_hand_image']
+
+            # 用第一帧填充历史（与训练一致）
+            for _ in range(2):
+                agentview_window.append(agentview_img)
+                eye_in_hand_window.append(eye_in_hand_img)
+
+            # 获取 proprio 状态
+            joint_states = obs['robot0_joint_pos']
+            gripper_states = obs['robot0_gripper_qpos']
+            proprio = torch.from_numpy(
+                np.concatenate([joint_states, gripper_states], axis=-1)
+            ).float()
+
+            global_steps = 0
+            done = False
+            task_success = False
+            reward = 0.0  # 初始化 reward
+            info = {}     # 初始化 info
+
+            # 🎯 重新规划频率：建议从1开始测试
+            REPLAN_FREQ = 1  # 每1步重新预测（推荐从这个开始）
             
-            # 预测动作序列
-            actions = policy.step(proprio, images, text_embed).squeeze(0).cpu().numpy()
-            
-            # 调试信息
-            if episode == 0 and global_steps == 0:
-                print(f"\n{'='*60}")
-                print(f"【首次预测调试信息】")
-                print(f"  Proprio shape: {proprio.shape}, range: [{proprio.min():.4f}, {proprio.max():.4f}]")
-                print(f"  Actions shape: {actions.shape}")
-                print(f"  EEF vel range: [{actions[:, :6].min():.4f}, {actions[:, :6].max():.4f}]")
-                print(f"  Gripper values (first 5): {actions[:5, -1]}")
-                print(f"  Expected: gripper in {{-1, 1}}, EEF vel in [-1, 1]")
-                print(f"{'='*60}\n")
-            
-            # 只执行前N步
-            num_exec_steps = min(REPLAN_FREQ, actions.shape[0], MAX_EPISODE_STEPS - global_steps)
-            
-            for idx in range(num_exec_steps):
-                action = actions[idx]
+            while global_steps < MAX_EPISODE_STEPS and not done:
+                # 准备图像输入
+                image_arrs = []
+                for i in range(2):  # img_history_size = 2
+                    image_arrs.append(agentview_window[i])      # 外部相机
+                    image_arrs.append(eye_in_hand_window[i])    # 右手腕
+                    image_arrs.append(None)                     # 左手腕（LIBERO 没有）
                 
-                # 安全检查
-                if np.any(np.isnan(action)) or np.any(np.isinf(action)):
-                    print(f"⚠️  Invalid action detected at step {global_steps}, skipping...")
-                    break
+                images = [Image.fromarray(arr) if arr is not None else None
+                        for arr in image_arrs]
                 
-                obs, reward, done, info = env.step(action)
+                # 预测动作序列
+                actions = policy.step(proprio, images, text_embed).squeeze(0).cpu().numpy()
                 
-                # 更新观察
-                agentview_window.append(obs['agentview_image'])
-                eye_in_hand_window.append(obs['robot0_eye_in_hand_image'])
+                # 调试信息
+                if episode == 0 and global_steps == 0:
+                    print(f"\n{'='*60}")
+                    print(f"【首次预测调试信息】")
+                    print(f"  Proprio shape: {proprio.shape}, range: [{proprio.min():.4f}, {proprio.max():.4f}]")
+                    print(f"  Actions shape: {actions.shape}")
+                    print(f"  EEF vel range: [{actions[:, :6].min():.4f}, {actions[:, :6].max():.4f}]")
+                    print(f"  Gripper values (first 5): {actions[:5, -1]}")
+                    print(f"  Expected: gripper in {{-1, 1}}, EEF vel in [-1, 1]")
+                    print(f"{'='*60}\n")
                 
-                # 更新 proprio
-                joint_states = obs['robot0_joint_pos']
-                gripper_states = obs['robot0_gripper_qpos']
-                proprio = torch.from_numpy(
-                    np.concatenate([joint_states, gripper_states], axis=-1)
-                ).float()
+                # 只执行前N步
+                num_exec_steps = min(REPLAN_FREQ, actions.shape[0], MAX_EPISODE_STEPS - global_steps)
                 
-                global_steps += 1
+                for idx in range(num_exec_steps):
+                    action = actions[idx]
+                    
+                    # 安全检查
+                    if np.any(np.isnan(action)) or np.any(np.isinf(action)):
+                        print(f"⚠️  Invalid action detected at step {global_steps}, skipping...")
+                        break
+                    
+                    obs, reward, done, info = env.step(action)
+                    
+                    # 记录视频帧
+                    video_writer.append_obs(
+                        obs, 
+                        done, 
+                        idx=episode,
+                        camera_name="agentview_image"
+                    )
+                    
+                    # 更新观察
+                    agentview_window.append(obs['agentview_image'])
+                    eye_in_hand_window.append(obs['robot0_eye_in_hand_image'])
+                    
+                    # 更新 proprio
+                    joint_states = obs['robot0_joint_pos']
+                    gripper_states = obs['robot0_gripper_qpos']
+                    proprio = torch.from_numpy(
+                        np.concatenate([joint_states, gripper_states], axis=-1)
+                    ).float()
+                    
+                    global_steps += 1
+                    
+                    # 进度监控（仅第一个episode）
+                    if episode == 0 and global_steps % 50 == 0:
+                        print(f"  → Step {global_steps:3d}: reward={reward:.2f}")
+                    
+                    # LIBERO 使用 info['success'] 来判定任务是否成功
+                    if 'success' in info and info['success']:
+                        task_success = True
+                        done = True
+                    
+                    if done:
+                        break
                 
-                # 进度监控（仅第一个episode）
-                if episode == 0 and global_steps % 50 == 0:
-                    print(f"  → Step {global_steps:3d}: reward={reward:.2f}")
-                
+                # 如果任务完成，跳出外层循环
                 if done:
-                    task_success = (reward > 0)
                     break
             
-            # 如果任务完成，跳出外层循环
-            if done:
-                break
+            # 循环外更新成功计数
+            if task_success:
+                success_count += 1
+            
+            # 增强的进度输出
+            status = "✓ SUCCESS" if task_success else "✗ FAILED"
+            print(f"Trial {episode+1:3d}/{total_episodes}: {status} | info['success']={info.get('success', False)} | steps={global_steps:3d}")
         
-        # 循环外更新成功计数
-        if task_success:
-            success_count += 1
-        
-        # 增强的进度输出
-        status = "✓ SUCCESS" if task_success else "✗ FAILED"
-        print(f"Trial {episode+1:3d}/{total_episodes}: {status} | reward={reward:.2f} | steps={global_steps:3d}")
+        # VideoWriter 会在退出 with 块时自动保存所有视频
     
     env.close()
     
@@ -254,6 +287,9 @@ def main():
     print(f"Success Count: {success_count}")
     print(f"Success Rate: {success_rate:.2f}%")
     print(f"{'='*50}")
+    
+    if args.save_videos:
+        print(f"\n📹 Videos saved to: {video_folder}")
 
 
 if __name__ == "__main__":
