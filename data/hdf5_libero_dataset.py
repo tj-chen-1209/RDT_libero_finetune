@@ -49,12 +49,12 @@ class HDF5VLADataset:
         for file_path in self.file_paths:
             with h5py.File(file_path, 'r') as f:
                 demo_keys = list(f['data'].keys())  # 获取 demo_X 名称
-            for demo_key in demo_keys:
-                demo = f['data'][demo_key]
-                num_steps = demo['actions'].shape[0]
+                for demo_key in demo_keys:
+                    demo = f['data'][demo_key]
+                    num_steps = demo['actions'].shape[0]
 
-                if num_steps >= 128:  # 丢弃太短的 demo
-                    self.episode_paths.append((file_path, demo_key, num_steps))
+                    if num_steps >= 128:  # 丢弃太短的 demo
+                        self.episode_paths.append((file_path, demo_key, num_steps))
         episode_lens = [episode[2]
                         for episode in self.episode_paths]  # 获取每个 demo_X 的长度
         self.episode_sample_weights = np.array(
@@ -95,14 +95,15 @@ class HDF5VLADataset:
         '''
         while True:
             if index is None:
-                demo_path = np.random.choice(
-                    self.episode_paths, p=self.episode_sample_weights)
+                demo_idx = np.random.choice(
+                    len(self.episode_paths), p=self.episode_sample_weights)
+                demo_path = self.episode_paths[demo_idx]
             else:
                 demo_path = self.episode_paths[index]
 
             file_path, demo_key, _ = demo_path  # 获取文件路径和 demo_key
-            valid, sample = self.parse_hdf5_file(
-                file_path, demo_key, state_only=state_only)
+            valid, sample = self.parse_hdf5_file(file_path, demo_key) \
+                if not state_only else self.parse_hdf5_file_state_only(file_path, demo_key)
             if valid:
                 return sample
             else:
@@ -149,7 +150,6 @@ class HDF5VLADataset:
         """
         with h5py.File(file_path, 'r') as f:
             # LIBERO dataset structure: data/demo_X/
-            # 在demo_X中随机选择一个demo 遍历 TODO
             demo = f['data'][demo_key]
             joint_states = demo['obs']['joint_states'][:]
             gripper_states = demo['obs']['gripper_states'][:]
@@ -215,22 +215,15 @@ class HDF5VLADataset:
                     instruction = task_name.replace('_', ' ')
                 
                 return instruction.strip()
-            # Load the instruction
-            instruction = extract_instruction(file_path)
-            '''
-            dir_path = os.path.dirname(file_path)
-            with open(os.path.join(dir_path, 'expanded_instruction_gpt-4-turbo.json'), 'r') as f_instr:
-                instruction_dict = json.load(f_instr)
-            # We have 1/3 prob to use original instruction,
-            # 1/3 to use simplified instruction,
-            # and 1/3 to use expanded instruction.
-            instruction_type = np.random.choice([
-                'instruction', 'simplified_instruction', 'expanded_instruction'])
-            instruction = instruction_dict[instruction_type]
-            if isinstance(instruction, list):
-                instruction = np.random.choice(instruction)
-            '''
+            
+            # embeddied instruction
+            task_name = os.path.basename(file_path).replace('_demo.hdf5', '')
+            lang_embed_path = os.path.join("outs/libero_embeddings", self.DATASET_NAME, task_name + ".pt")
 
+            if os.path.exists(lang_embed_path):
+                instruction = lang_embed_path
+            else:
+                instruction = extract_instruction(file_path)
             # You can also use precomputed language embeddings (recommended)
             # instruction = "path/to/lang_embed.pt"
 

@@ -5,11 +5,17 @@ in `pretrain_datasets.json` or `pretrain_datasets.json`.
 
 import json
 import argparse
+import sys
+import os
+
+# Add parent directory to path to allow imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 from tqdm import tqdm
 
-from data.hdf5_vla_dataset import HDF5VLADataset
+from data.hdf5_libero_dataset import HDF5VLADataset
+# from data.hdf5_vla_dataset import HDF5VLADataset
 
 
 def process_hdf5_dataset(vla_dataset):
