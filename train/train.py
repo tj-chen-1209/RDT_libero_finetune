@@ -163,15 +163,9 @@ def train(args, logger):
                 target_modules = [
                     "attn.qkv", "attn.proj",           # 自注意力
                     "cross_attn.q", "cross_attn.kv", "cross_attn.proj",  # 交叉注意力
-                    "ffn.fc1", "ffn.fc2"               # FFN
+                    "ffn.fc1", "ffn.fc2",               # FFN
+                    "lang_adaptor","img_adaptor","state_adaptor" # 条件适配器
                 ]
-            elif args.lora_target_modules == "attention":
-                target_modules = [
-                    "attn.qkv", "attn.proj", 
-                    "cross_attn.q", "cross_attn.kv", "cross_attn.proj"
-                ]
-            elif args.lora_target_modules == "mlp":
-                target_modules = ["ffn.fc1", "ffn.fc2"]
             
             lora_config = LoraConfig(
                 r=args.lora_rank,

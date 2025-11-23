@@ -37,12 +37,25 @@ run_id=$(date +%Y%m%d_%H%M%S)
 source /share_data/zhukefei/miniconda3/etc/profile.d/conda.sh
 conda activate rdt_libero_eval
 
+# DATASET_NAME="libero_90"
 DATASET_NAME="libero_10"
-NUM_TRAJ=10
-CHECKPOINT="./checkpoints/rdt-finetune-1b-20251119_122234/checkpoint-30000"
+NUM_TRAJ=20   # 正式评估 测试为3
+CHECKPOINT="./checkpoints/rdt-finetune-1b-20251119_122234/checkpoint-45000"
 CHECKPOINT_NAME=$(basename "${CHECKPOINT}")
 
-for TASK_ID in {0..9}; do
+# 所有 task 共用一个 CSV
+METRICS_PATH="outs/metrics/${DATASET_NAME}_${CHECKPOINT_NAME}_${run_id}.csv"
+
+if [ "$DATASET_NAME" == "libero_10" ]; then
+    TASK_RANGE=$(seq 0 9)
+elif [ "$DATASET_NAME" == "libero_90" ]; then
+    TASK_RANGE=$(seq 0 89)
+else
+    echo "Invalid dataset name: ${DATASET_NAME}"
+    exit 1
+fi
+
+for TASK_ID in ${TASK_RANGE}; do
     VIDEO_DIR="outs/eval_videos/${DATASET_NAME}_${CHECKPOINT_NAME}_${run_id}/task${TASK_ID}"
     echo ""
     echo "==== Task ${TASK_ID} ===="
@@ -52,5 +65,6 @@ for TASK_ID in {0..9}; do
         --pretrained-path ${CHECKPOINT} \
         --dataset-name ${DATASET_NAME} \
         --save-videos \
-        --video-dir "${VIDEO_DIR}" | tee "logs/task${TASK_ID}_${run_id}.log"
+        --video-dir "${VIDEO_DIR}" \
+        --metrics-path "${METRICS_PATH}"
 done

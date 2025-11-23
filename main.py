@@ -304,12 +304,11 @@ def parse_args(input_args=None):
         "--lora_target_modules",
         type=str,
         default="all",
-        choices=["all", "attention", "mlp"],
+        choices=["all"],
         help=(
             "Which modules to apply LoRA to. "
-            "'all': attention + MLP (recommended), "
-            "'attention': only attention layers, "
-            "'mlp': only MLP layers."
+            "'all': all modules."
+            "Recommended to use 'all' for best performance."
         ),
     )
 
