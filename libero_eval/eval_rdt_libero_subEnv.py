@@ -96,7 +96,8 @@ def load_language_embedding(task_name, dataset_name="libero_10", policy=None):
     加载语言嵌入（优先使用预计算，否则动态编码）
     """
     lang_embed_path = os.path.join("outs/libero_embeddings", dataset_name, f"{task_name}.pt")
-    
+    # lang_embed_path = os.path.join("outs/libero_embeddings", dataset_name, f"{task_name}")
+
     if os.path.exists(lang_embed_path):
         print(f"✓ Loading pre-computed embedding: {task_name}")
         lang_data = torch.load(lang_embed_path)

@@ -63,5 +63,8 @@
     "calvin": 30,
     "bridgev2": 5,
     "libero_90": 20,
-    "libero_10": 20
+    "libero_10": 20,
+    "libero_goal": 20,
+    "libero_object": 20,
+    "libero_spatial": 20
 }

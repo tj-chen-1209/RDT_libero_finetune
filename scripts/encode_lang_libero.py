@@ -140,14 +140,20 @@ def encode_libero_tasks(dataset_name="libero_10"):
 
 
 if __name__ == "__main__":
-    # 为 LIBERO-10 生成语言嵌入
+    # 为 LIBERO-goal 生成语言嵌入
     print("=" * 80)
-    print("Encoding LIBERO-10 tasks...")
+    print("Encoding LIBERO-goal tasks...")
     print("=" * 80)
-    encode_libero_tasks("libero_10")
+    encode_libero_tasks("libero_goal")
     
-    # 为 LIBERO-90 生成语言嵌入
+    # 为 LIBERO-object 生成语言嵌入
     print("\n" + "=" * 80)
-    print("Encoding LIBERO-90 tasks...")
+    print("Encoding LIBERO-object tasks...")
     print("=" * 80)
-    encode_libero_tasks("libero_90")
+    encode_libero_tasks("libero_object")
+
+    # 为 LIBERO-spatial 生成语言嵌入
+    print("\n" + "=" * 80)
+    print("Encoding LIBERO-spatial tasks...")
+    print("=" * 80)
+    encode_libero_tasks("libero_spatial")

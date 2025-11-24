@@ -15,8 +15,9 @@ BASE_OUTPUT_DIR="./checkpoints/rdt-finetune-1b"
 export CFLAGS="-I/usr/include"
 export LDFLAGS="-L/usr/lib/x86_64-linux-gnu"
 # export CUTLASS_PATH="/path/to/cutlass"
+dataset_name="libero_10"
 
-export WANDB_PROJECT="rdt_libero_finetune_lora_csq"
+export WANDB_PROJECT="rdt_libero_sft_lora_csq"
 
 #========================================================================
 # LoRA 微调模式（推荐用于快速实验和资源受限场景）
@@ -29,15 +30,16 @@ export WANDB_PROJECT="rdt_libero_finetune_lora_csq"
 # 
 # 使用方法：取消下面的注释，注释掉上面的全参数微调命令
 # ========================================================================
-export LORA_OUTPUT_DIR="${BASE_OUTPUT_DIR}-lora-${run_id}"
+export LORA_OUTPUT_DIR="${WANDB_PROJECT}-${dataset_name}-${run_id}"
 
 if [ ! -d "$LORA_OUTPUT_DIR" ]; then
     mkdir "$LORA_OUTPUT_DIR"
     echo "LoRA output folder '$LORA_OUTPUT_DIR' created"
 fi
 
-# deepspeed --exclude="localhost:0" main.py \
-deepspeed main.py \
+# pretrained_path 要改成 base
+# deepspeed main.py \
+deepspeed --exclude="localhost:0" main_sft.py \
     --deepspeed="./configs/zero2.json" \
     --pretrained_model_name_or_path="./checkpoints/rdt-1b" \
     --pretrained_text_encoder_name_or_path=$TEXT_ENCODER_NAME \

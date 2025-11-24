@@ -11,12 +11,12 @@ conda activate rdt_libero_eval
 
 # ========== 配置参数 ==========
 TASK_ID=0                  # 任务 ID (libero_10: 0-9)
-NUM_TRAJ=25                # 评估轨迹数量
-DATASET_NAME="libero_10"   # 数据集名称
+NUM_TRAJ=1                # 评估轨迹数量
+DATASET_NAME="libero_90"   # 数据集名称
 
 # LoRA 模型配置
 BASE_MODEL="./checkpoints/rdt-1b"  # 基础模型路径
-LORA_WEIGHTS="./checkpoints/rdt-finetune-1b-lora-XXXXXX/checkpoint-20000"  # LoRA权重路径（需要修改）
+LORA_WEIGHTS="./checkpoints/rdt-finetune-1b-lora-XXXXXX/checkpoint-000"  # LoRA权重路径（需要修改）
 
 # 检查LoRA权重路径是否存在
 if [ ! -d "$LORA_WEIGHTS" ]; then
