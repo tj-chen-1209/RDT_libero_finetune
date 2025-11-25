@@ -11,7 +11,7 @@ DATASET_NAME="libero_90"
 # 调试：可以设成 3；正式评估：建议 20 跟 LIBERO 一致
 NUM_ENVS=1
 
-CHECKPOINT="./checkpoints/rdt-finetune-1b-20251119_122234/checkpoint-75000"
+CHECKPOINT="./checkpoints/rdt-finetune-1b-20251119_122234/checkpoint-70000"
 CHECKPOINT_NAME=$(basename "${CHECKPOINT}")
 
 # 所有 task 共用一个 CSV

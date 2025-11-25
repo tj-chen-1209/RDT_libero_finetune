@@ -19,8 +19,8 @@ class HDF5LiberoSFTDataset:
         # [Modify] The path to the HDF5 dataset directory
         # Each HDF5 file contains one episode 
         # TODO: change the dataset name
-        HDF5_DIR = "data/datasets/libero_10/"
-        self.DATASET_NAME = "libero_10"
+        HDF5_DIR = "data/datasets/libero_spatial/"
+        self.DATASET_NAME = "libero_spatial"
 
         self.file_paths = []
         for root, _, files in os.walk(HDF5_DIR):
@@ -66,19 +66,20 @@ class HDF5LiberoSFTDataset:
             with h5py.File(file_path, 'r') as f:
                 # 确保结构里有 data/demo_0
                 if 'data' not in f:
+                    print(f"File {file_path} does not have data")
                     continue
                 if 'demo_0' not in f['data']:
+                    print(f"File {file_path} does not have demo_0")
                     continue
 
                 demo_key = 'demo_0'
                 demo = f['data'][demo_key]
                 num_steps = demo['actions'].shape[0]
 
-                if num_steps >= 128:  # 丢弃太短的 demo
-                    self.episode_paths.append((file_path, demo_key, num_steps))
+                # if num_steps >= 128:  # 丢弃太短的 demo
+                self.episode_paths.append((file_path, demo_key, num_steps))
         episode_lens = [ep[2] for ep in self.episode_paths]
         self.episode_sample_weights = np.array(episode_lens) / np.sum(episode_lens)
-
 
     def __len__(self):
         return len(self.episode_paths)

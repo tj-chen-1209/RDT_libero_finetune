@@ -6,7 +6,7 @@ export NCCL_DEBUG=INFO
 export NCCL_NVLS_ENABLE=0
 export DS_BUILD_EVOFORMER_ATTN=0
 # export CUDA_VISIBLE_DEVICES="1,2,3,4,5,6,7"
-export CUDA_VISIBLE_DEVICES=0
+# export CUDA_VISIBLE_DEVICES=0
 
 
 export TEXT_ENCODER_NAME="google/t5-v1_1-xxl"
@@ -16,7 +16,7 @@ export CFLAGS="-I/usr/include"
 export LDFLAGS="-L/usr/lib/x86_64-linux-gnu"
 # export CUTLASS_PATH="/path/to/cutlass"
 dataset_name="libero_10"
-
+BASE_OUTPUT_DIR="./checkpoints/${WANDB_PROJECT}-${dataset_name}"
 export WANDB_PROJECT="rdt_libero_sft_lora_csq"
 
 #========================================================================
@@ -30,7 +30,7 @@ export WANDB_PROJECT="rdt_libero_sft_lora_csq"
 # 
 # 使用方法：取消下面的注释，注释掉上面的全参数微调命令
 # ========================================================================
-export LORA_OUTPUT_DIR="${WANDB_PROJECT}-${dataset_name}-${run_id}"
+export LORA_OUTPUT_DIR="./checkpoints/${WANDB_PROJECT}-${dataset_name}-${run_id}"
 
 if [ ! -d "$LORA_OUTPUT_DIR" ]; then
     mkdir "$LORA_OUTPUT_DIR"

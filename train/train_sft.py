@@ -12,7 +12,7 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-
+import json
 import copy
 import logging
 import math
@@ -152,7 +152,31 @@ def train(args, logger):
         and not os.path.isfile(args.pretrained_model_name_or_path)
     ):
         logger.info("Constructing model from pretrained checkpoint.")
-        rdt = RDTRunner.from_pretrained(args.pretrained_model_name_or_path)
+        ckpt_path = args.pretrained_model_name_or_path
+        cfg_file = os.path.join(ckpt_path, "config.json")
+        with open(cfg_file, "r") as f:
+            ckpt_cfg = json.load(f)
+
+        model_kwargs = dict(
+            action_dim=ckpt_cfg["action_dim"],
+            pred_horizon=ckpt_cfg["pred_horizon"],
+            config={
+                "rdt": ckpt_cfg["rdt"],
+                "lang_adaptor": ckpt_cfg["lang_adaptor"],
+                "img_adaptor": ckpt_cfg["img_adaptor"],
+                "state_adaptor": ckpt_cfg["state_adaptor"],
+                "noise_scheduler": ckpt_cfg["noise_scheduler"],
+            },
+            lang_token_dim=ckpt_cfg["lang_token_dim"],
+            img_token_dim=ckpt_cfg["img_token_dim"],
+            state_token_dim=ckpt_cfg["state_token_dim"],
+            max_lang_cond_len=ckpt_cfg["max_lang_cond_len"],
+            img_cond_len=ckpt_cfg["img_cond_len"],
+            lang_pos_embed_config=ckpt_cfg.get("lang_pos_embed_config"),
+            img_pos_embed_config=ckpt_cfg.get("img_pos_embed_config"),
+            dtype=weight_dtype,
+        )
+        rdt = RDTRunner.from_pretrained(ckpt_path, **model_kwargs)
         
         # 应用 LoRA (如果启用)
         if args.use_lora:
