@@ -5,13 +5,13 @@ source /share_data/zhukefei/miniconda3/etc/profile.d/conda.sh
 conda activate rdt_libero_eval
 
 # DATASET_NAME="libero_90"
-DATASET_NAME="libero_90"
+DATASET_NAME="libero_spatial"
 
 # 并行 env 数 (= 每个 task 的 episode 数)
 # 调试：可以设成 3；正式评估：建议 20 跟 LIBERO 一致
 NUM_ENVS=1
 
-CHECKPOINT="./checkpoints/rdt-finetune-1b-20251119_122234/checkpoint-70000"
+CHECKPOINT="./checkpoints/rdt-rdt_libero_sft_csq-libero_spatial-20251125_114702/checkpoint-65000"
 CHECKPOINT_NAME=$(basename "${CHECKPOINT}")
 
 # 所有 task 共用一个 CSV

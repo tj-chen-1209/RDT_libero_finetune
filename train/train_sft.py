@@ -188,7 +188,9 @@ def train(args, logger):
                     "attn.qkv", "attn.proj",           # 自注意力
                     "cross_attn.q", "cross_attn.kv", "cross_attn.proj",  # 交叉注意力
                     "ffn.fc1", "ffn.fc2",               # FFN
-                    "lang_adaptor","img_adaptor","state_adaptor" # 条件适配器
+                    "lang_adaptor.0","lang_adaptor.2",
+                    "img_adaptor.0","img_adaptor.2",
+                    "state_adaptor.0","state_adaptor.2","state_adaptor.4" # 条件适配器
                 ]
             
             lora_config = LoraConfig(

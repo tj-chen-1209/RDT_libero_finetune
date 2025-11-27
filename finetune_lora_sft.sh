@@ -38,10 +38,10 @@ if [ ! -d "$LORA_OUTPUT_DIR" ]; then
 fi
 
 # pretrained_path 要改成 base
+# --pretrained_model_name_or_path="./checkpoints/rdt-1b" \
 # deepspeed main.py \
 deepspeed --exclude="localhost:0" main_sft.py \
     --deepspeed="./configs/zero2.json" \
-    --pretrained_model_name_or_path="./checkpoints/rdt-1b" \
     --pretrained_text_encoder_name_or_path=$TEXT_ENCODER_NAME \
     --pretrained_vision_encoder_name_or_path=$VISION_ENCODER_NAME \
     --output_dir=$LORA_OUTPUT_DIR \
@@ -50,8 +50,9 @@ deepspeed --exclude="localhost:0" main_sft.py \
     --lora_alpha=64 \
     --lora_dropout=0.1 \
     --lora_target_modules="all" \
-    --train_batch_size=64 \
-    --sample_batch_size=128 \
+    --train_batch_size=32 \
+    --sample_batch_size=32 \
+    --num_sample_batches=4 \
     --max_train_steps=200000 \
     --checkpointing_period=5000 \
     --sample_period=500 \

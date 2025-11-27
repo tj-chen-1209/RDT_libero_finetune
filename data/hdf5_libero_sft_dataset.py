@@ -15,12 +15,13 @@ class HDF5LiberoSFTDataset:
     stored in HDF5.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, use_cache=True) -> None:
         # [Modify] The path to the HDF5 dataset directory
         # Each HDF5 file contains one episode 
         # TODO: change the dataset name
         HDF5_DIR = "data/datasets/libero_spatial/"
         self.DATASET_NAME = "libero_spatial"
+        self.use_cache = use_cache
 
         self.file_paths = []
         for root, _, files in os.walk(HDF5_DIR):
@@ -80,6 +81,32 @@ class HDF5LiberoSFTDataset:
                 self.episode_paths.append((file_path, demo_key, num_steps))
         episode_lens = [ep[2] for ep in self.episode_paths]
         self.episode_sample_weights = np.array(episode_lens) / np.sum(episode_lens)
+        
+        # 🚀 内存缓存：预加载所有数据到RAM（数据集小于200MB，内存充足）
+        self.cache = {}
+        if self.use_cache:
+            print(f"[Memory Cache] Preloading {len(self.episode_paths)} episodes to RAM...")
+            for idx, (file_path, demo_key, _) in enumerate(self.episode_paths):
+                with h5py.File(file_path, 'r') as f:
+                    demo = f['data'][demo_key]
+                    # 预加载所有需要的数据
+                    self.cache[file_path] = {
+                        'joint_states': demo['obs']['joint_states'][:],
+                        'gripper_states': demo['obs']['gripper_states'][:],
+                        'agentview_rgb': demo['obs']['agentview_rgb'][:],
+                        'eye_in_hand_rgb': demo['obs']['eye_in_hand_rgb'][:],
+                        'actions': demo['actions'][:],
+                    }
+                if (idx + 1) % 5 == 0 or idx == len(self.episode_paths) - 1:
+                    print(f"  Loaded {idx + 1}/{len(self.episode_paths)} episodes")
+            
+            # 计算实际占用的内存
+            total_size = sum(
+                sum(arr.nbytes for arr in cache_data.values())
+                for cache_data in self.cache.values()
+            )
+            print(f"[Memory Cache] ✅ Preloaded {len(self.cache)} episodes ({total_size/1024/1024:.1f}MB)")
+            print(f"[Memory Cache] Training will be significantly faster (no disk I/O)!")
 
     def __len__(self):
         return len(self.episode_paths)
@@ -131,7 +158,7 @@ class HDF5LiberoSFTDataset:
                 index = np.random.randint(0, len(self.episode_paths))
 
     def parse_hdf5_file(self, file_path, demo_key):
-        """[Modify] Parse a hdf5 file to generate a training sample at
+        """[Modify] Parse a hdf5 file (or cache) to generate a training sample at
             a random timestep.
 
         Args:
@@ -169,214 +196,232 @@ class HDF5LiberoSFTDataset:
                     "cam_right_wrist_mask": ndarray
                 } or None if the episode is invalid.
         """
-        with h5py.File(file_path, 'r') as f:
-            # LIBERO dataset structure: data/demo_X/
-            demo = f['data'][demo_key]
-            joint_states = demo['obs']['joint_states'][:]
-            gripper_states = demo['obs']['gripper_states'][:]
-
+        # 🚀 从缓存或文件读取数据
+        if self.use_cache and file_path in self.cache:
+            # 从内存缓存读取（快速）
+            cached_data = self.cache[file_path]
+            joint_states = cached_data['joint_states']
+            gripper_states = cached_data['gripper_states']
+            agentview_rgb = cached_data['agentview_rgb']
+            eye_in_hand_rgb = cached_data['eye_in_hand_rgb']
+            actions_data = cached_data['actions']
+            
             # Concatenate joint states and gripper states 7DoF+2gripper
             qpos = np.concatenate([joint_states, gripper_states], axis=1)
-            num_steps = qpos.shape[0]
-            # [Optional] We drop too-short episode
-            # if num_steps < 128:
-            #     return False, None
+        else:
+            # 从HDF5文件读取（慢速）
+            with h5py.File(file_path, 'r') as f:
+                # LIBERO dataset structure: data/demo_X/
+                demo = f['data'][demo_key]
+                joint_states = demo['obs']['joint_states'][:]
+                gripper_states = demo['obs']['gripper_states'][:]
+                agentview_rgb = demo['obs']['agentview_rgb'][:]
+                eye_in_hand_rgb = demo['obs']['eye_in_hand_rgb'][:]
+                actions_data = demo['actions'][:]
 
-            # [Optional] We skip the first few still steps TODO
-            EPS = 1e-2
-            # Get the idx of the first qpos whose delta exceeds the threshold
-            qpos_delta = np.abs(qpos - qpos[0:1])
-            indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
-            if len(indices) > 0:
-                first_idx = indices[0]
-            else:
-                raise ValueError("Found no qpos that exceeds the threshold.")
+                # Concatenate joint states and gripper states 7DoF+2gripper
+                qpos = np.concatenate([joint_states, gripper_states], axis=1)
+        
+        num_steps = qpos.shape[0]
+        # [Optional] We drop too-short episode
+        # if num_steps < 128:
+        #     return False, None
 
-            # We randomly sample a timestep TODO
-            step_id = np.random.randint(first_idx-1, num_steps)
+        # [Optional] We skip the first few still steps TODO
+        EPS = 1e-2
+        # Get the idx of the first qpos whose delta exceeds the threshold
+        qpos_delta = np.abs(qpos - qpos[0:1])
+        indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
+        if len(indices) > 0:
+            first_idx = indices[0]
+        else:
+            raise ValueError("Found no qpos that exceeds the threshold.")
 
-            # TODO: add instruction 这个地方要跟 eval 对齐
-            def extract_instruction(file_path):
-                """
-                从 HDF5 文件名中提取任务指令
-                
-                Args:
-                    file_path: HDF5 文件路径，例如：
-                        "KITCHEN_SCENE3_turn_on_the_stove_and_put_the_moka_pot_on_it_demo.hdf5"
-                        "pick_up_the_black_bowl_and_place_it_on_the_plate_demo.hdf5"
-                
-                Returns:
-                    str: 提取的指令，例如：
-                        "turn on the stove and put the moka pot on it"
-                        "pick up the black bowl and place it on the plate"
-                """
-                # 获取文件名（不含路径和扩展名）
-                task_name = os.path.basename(file_path).replace('_demo.hdf5', '')
-                 # 如果文件名以大写字母开头（如 KITCHEN_SCENE3_...）
-                if task_name and task_name[0].isupper():
-                    # 查找 SCENE 的位置
-                    scene_pos = task_name.find("SCENE")
-                    if scene_pos != -1:
-                        # 检查是否是 SCENE10（需要跳过 8 个字符：SCENE10_）
-                        if "SCENE10" in task_name:
-                            # 从 SCENE10_ 之后开始提取
-                            language_part = task_name[scene_pos + 8:]
-                        else:
-                            # 从 SCENE#_ 之后开始提取（跳过 7 个字符：SCENE + 数字 + _）
-                            # 例如：SCENE3_ -> 跳过 7 个字符
-                            language_part = task_name[scene_pos + 7:]
-                        
-                        # 将下划线替换为空格
-                        instruction = language_part.replace('_', ' ')
-                    else:
-                        # 没有找到 SCENE，直接替换所有下划线
-                        instruction = task_name.replace('_', ' ')
-                else:
-                    # 文件名不以大写字母开头，直接替换所有下划线
-                    instruction = task_name.replace('_', ' ')
-                
-                return instruction.strip()
+        # We randomly sample a timestep TODO
+        step_id = np.random.randint(first_idx-1, num_steps)
+
+        # TODO: add instruction 这个地方要跟 eval 对齐
+        def extract_instruction(file_path):
+            """
+            从 HDF5 文件名中提取任务指令
             
-            # embeddied instruction
+            Args:
+                file_path: HDF5 文件路径，例如：
+                    "KITCHEN_SCENE3_turn_on_the_stove_and_put_the_moka_pot_on_it_demo.hdf5"
+                    "pick_up_the_black_bowl_and_place_it_on_the_plate_demo.hdf5"
+            
+            Returns:
+                str: 提取的指令，例如：
+                    "turn on the stove and put the moka pot on it"
+                    "pick up the black bowl and place it on the plate"
+            """
+            # 获取文件名（不含路径和扩展名）
             task_name = os.path.basename(file_path).replace('_demo.hdf5', '')
-            lang_embed_path = os.path.join("outs/libero_embeddings", self.DATASET_NAME, task_name + ".pt")
-
-            if os.path.exists(lang_embed_path):
-                instruction = lang_embed_path
+             # 如果文件名以大写字母开头（如 KITCHEN_SCENE3_...）
+            if task_name and task_name[0].isupper():
+                # 查找 SCENE 的位置
+                scene_pos = task_name.find("SCENE")
+                if scene_pos != -1:
+                    # 检查是否是 SCENE10（需要跳过 8 个字符：SCENE10_）
+                    if "SCENE10" in task_name:
+                        # 从 SCENE10_ 之后开始提取
+                        language_part = task_name[scene_pos + 8:]
+                    else:
+                        # 从 SCENE#_ 之后开始提取（跳过 7 个字符：SCENE + 数字 + _）
+                        # 例如：SCENE3_ -> 跳过 7 个字符
+                        language_part = task_name[scene_pos + 7:]
+                    
+                    # 将下划线替换为空格
+                    instruction = language_part.replace('_', ' ')
+                else:
+                    # 没有找到 SCENE，直接替换所有下划线
+                    instruction = task_name.replace('_', ' ')
             else:
-                instruction = extract_instruction(file_path)
-            # You can also use precomputed language embeddings (recommended)
-            # instruction = "path/to/lang_embed.pt"
+                # 文件名不以大写字母开头，直接替换所有下划线
+                instruction = task_name.replace('_', ' ')
+            
+            return instruction.strip()
+        
+        # embeddied instruction
+        task_name = os.path.basename(file_path).replace('_demo.hdf5', '')
+        lang_embed_path = os.path.join("outs/libero_embeddings", self.DATASET_NAME, task_name + ".pt")
 
-            # Assemble the meta
-            meta = {
-                "dataset_name": self.DATASET_NAME,
-                "#steps": num_steps,
-                "step_id": step_id,
-                "instruction": instruction
-            }
+        if os.path.exists(lang_embed_path):
+            instruction = lang_embed_path
+        else:
+            instruction = extract_instruction(file_path)
+        # You can also use precomputed language embeddings (recommended)
+        # instruction = "path/to/lang_embed.pt"
 
-            # Max-min normalization for the gripper states (last 2 dimensions) TODO: max-min qpos correct
-            qpos_min = -0.04245
-            qpos_max = 0.05185
-            qpos[..., -2:] = (qpos[..., -2:] - qpos_min) / \
-                (qpos_max - qpos_min)
+        # Assemble the meta
+        meta = {
+            "dataset_name": self.DATASET_NAME,
+            "#steps": num_steps,
+            "step_id": step_id,
+            "instruction": instruction
+        }
 
-            # Extract actions: 6D EEF velocities + 1D gripper velocity
-            target_qpos = demo['actions'][step_id:step_id+self.CHUNK_SIZE]
+        # Max-min normalization for the gripper states (last 2 dimensions) TODO: max-min qpos correct
+        qpos_min = -0.04245
+        qpos_max = 0.05185
+        qpos[..., -2:] = (qpos[..., -2:] - qpos_min) / \
+            (qpos_max - qpos_min)
 
-            # Parse the state and action
-            state = qpos[step_id:step_id+1]
-            state_std = np.std(qpos, axis=0)
-            state_mean = np.mean(qpos, axis=0)
-            state_norm = np.sqrt(np.mean(qpos**2, axis=0))
-            actions = target_qpos
-            if actions.shape[0] < self.CHUNK_SIZE:
-                # Pad the actions using the last action
-                actions = np.concatenate([
-                    actions,
-                    np.tile(actions[-1:],
-                            (self.CHUNK_SIZE-actions.shape[0], 1))
+        # Extract actions: 6D EEF velocities + 1D gripper velocity
+        target_qpos = actions_data[step_id:step_id+self.CHUNK_SIZE]
+
+        # Parse the state and action
+        state = qpos[step_id:step_id+1]
+        state_std = np.std(qpos, axis=0)
+        state_mean = np.mean(qpos, axis=0)
+        state_norm = np.sqrt(np.mean(qpos**2, axis=0))
+        actions = target_qpos
+        if actions.shape[0] < self.CHUNK_SIZE:
+            # Pad the actions using the last action
+            actions = np.concatenate([
+                actions,
+                np.tile(actions[-1:],
+                        (self.CHUNK_SIZE-actions.shape[0], 1))
+            ], axis=0)
+
+        # Fill the state/action into the unified vector
+        def fill_in_state(values):
+            # Target indices corresponding to your state space
+            # In this example: 7 joints + 2 gripper for each arm
+            UNI_STATE_INDICES = [
+                STATE_VEC_IDX_MAPPING[f"arm_joint_{i}_pos"] for i in range(7)
+            ] + [
+                STATE_VEC_IDX_MAPPING[f"gripper_joint_{i}_pos"] for i in range(2)
+            ]
+            uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
+            uni_vec[..., UNI_STATE_INDICES] = values
+            return uni_vec
+        state = fill_in_state(state)
+        state_indicator = fill_in_state(np.ones_like(state_std))
+        state_std = fill_in_state(state_std)
+        state_mean = fill_in_state(state_mean)
+        state_norm = fill_in_state(state_norm)
+
+        # Fill the action into the unified vector 都认为是velocity
+        def fill_in_action(values):
+            UNI_ACTION_INDICES = [
+                STATE_VEC_IDX_MAPPING["eef_vel_x"],
+                STATE_VEC_IDX_MAPPING["eef_vel_y"],
+                STATE_VEC_IDX_MAPPING["eef_vel_z"],
+                STATE_VEC_IDX_MAPPING["eef_angular_vel_roll"],
+                STATE_VEC_IDX_MAPPING["eef_angular_vel_pitch"],
+                STATE_VEC_IDX_MAPPING["eef_angular_vel_yaw"],
+            ] + [
+                STATE_VEC_IDX_MAPPING["gripper_open"]
+            ]
+            uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
+            uni_vec[..., UNI_ACTION_INDICES] = values
+            return uni_vec
+        actions = fill_in_action(actions)
+
+        # Parse the images libero的图片是numpy数组
+        def parse_img(img_array):
+            # img_array是预加载的完整图像序列
+            if img_array is None or img_array.shape[1] == 0:
+                return np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0))
+            imgs = []
+            for i in range(max(step_id-self.IMG_HISORY_SIZE+1, 0), step_id+1):
+                img = img_array[i]
+                imgs.append(img)
+            imgs = np.stack(imgs)
+            if imgs.shape[0] < self.IMG_HISORY_SIZE:
+                # Pad the images using the first image
+                imgs = np.concatenate([
+                    np.tile(imgs[:1], (self.IMG_HISORY_SIZE -
+                            imgs.shape[0], 1, 1, 1)),
+                    imgs
                 ], axis=0)
+            return imgs
 
-            # Fill the state/action into the unified vector
-            def fill_in_state(values):
-                # Target indices corresponding to your state space
-                # In this example: 7 joints + 2 gripper for each arm
-                UNI_STATE_INDICES = [
-                    STATE_VEC_IDX_MAPPING[f"arm_joint_{i}_pos"] for i in range(7)
-                ] + [
-                    STATE_VEC_IDX_MAPPING[f"gripper_joint_{i}_pos"] for i in range(2)
-                ]
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
-                uni_vec[..., UNI_STATE_INDICES] = values
-                return uni_vec
-            state = fill_in_state(state)
-            state_indicator = fill_in_state(np.ones_like(state_std))
-            state_std = fill_in_state(state_std)
-            state_mean = fill_in_state(state_mean)
-            state_norm = fill_in_state(state_norm)
+        # For step_id = first_idx - 1, the valid_len should be one
+        valid_len = min(step_id - (first_idx - 1) +
+                        1, self.IMG_HISORY_SIZE)
+        cam_high_mask = np.array(
+            [False] * (self.IMG_HISORY_SIZE - valid_len) +
+            [True] * valid_len
+        )
 
-            # Fill the action into the unified vector 都认为是velocity
-            def fill_in_action(values):
-                UNI_ACTION_INDICES = [
-                    STATE_VEC_IDX_MAPPING["eef_vel_x"],
-                    STATE_VEC_IDX_MAPPING["eef_vel_y"],
-                    STATE_VEC_IDX_MAPPING["eef_vel_z"],
-                    STATE_VEC_IDX_MAPPING["eef_angular_vel_roll"],
-                    STATE_VEC_IDX_MAPPING["eef_angular_vel_pitch"],
-                    STATE_VEC_IDX_MAPPING["eef_angular_vel_yaw"],
-                ] + [
-                    STATE_VEC_IDX_MAPPING["gripper_open"]
-                ]
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
-                uni_vec[..., UNI_ACTION_INDICES] = values
-                return uni_vec
-            actions = fill_in_action(actions)
+        # `cam_high` is the external camera image
+        cam_high = parse_img(agentview_rgb)
+        cam_high_mask = cam_high_mask if cam_high.shape[1] > 0 else np.zeros(
+            self.IMG_HISORY_SIZE, dtype=bool)
 
-            # Parse the images libero的图片是numpy数组
-            def parse_img(key):
-                # Check if the key exists in the demo
-                if key not in demo['obs']:
-                    return np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0))
-                imgs = []
-                for i in range(max(step_id-self.IMG_HISORY_SIZE+1, 0), step_id+1):
-                    img = demo['obs'][key][i]
-                    imgs.append(img)
-                imgs = np.stack(imgs)
-                if imgs.shape[0] < self.IMG_HISORY_SIZE:
-                    # Pad the images using the first image
-                    imgs = np.concatenate([
-                        np.tile(imgs[:1], (self.IMG_HISORY_SIZE -
-                                imgs.shape[0], 1, 1, 1)),
-                        imgs
-                    ], axis=0)
-                return imgs
+        # Left wrist camera is not available in LIBERO
+        cam_left_wrist = np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0))
+        cam_left_wrist_mask = np.zeros(self.IMG_HISORY_SIZE, dtype=bool)
 
-            # For step_id = first_idx - 1, the valid_len should be one
-            valid_len = min(step_id - (first_idx - 1) +
-                            1, self.IMG_HISORY_SIZE)
-            cam_high_mask = np.array(
-                [False] * (self.IMG_HISORY_SIZE - valid_len) +
-                [True] * valid_len
-            )
+        # Right wrist camera (eye-in-hand)
+        cam_right_wrist = parse_img(eye_in_hand_rgb)
+        cam_right_wrist_mask = cam_high_mask.copy(
+        ) if cam_right_wrist.shape[1] > 0 else np.zeros(self.IMG_HISORY_SIZE, dtype=bool)
 
-            # `cam_high` is the external camera image
-            cam_high = parse_img('agentview_rgb')
-            cam_high_mask = cam_high_mask if cam_high.shape[1] > 0 else np.zeros(
-                self.IMG_HISORY_SIZE, dtype=bool)
-
-            # Left wrist camera is not available in LIBERO
-            cam_left_wrist = np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0))
-            cam_left_wrist_mask = np.zeros(self.IMG_HISORY_SIZE, dtype=bool)
-
-            # Right wrist camera (eye-in-hand)
-            cam_right_wrist = parse_img('eye_in_hand_rgb')
-            cam_right_wrist_mask = cam_high_mask.copy(
-            ) if cam_right_wrist.shape[1] > 0 else np.zeros(self.IMG_HISORY_SIZE, dtype=bool)
-
-            # Return the resulting sample
-            # For unavailable images, return zero-shape arrays, i.e., (IMG_HISORY_SIZE, 0, 0, 0)
-            # E.g., return np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0)) for the key "cam_left_wrist",
-            # if the left-wrist camera is unavailable on your robot
-            return True, {
-                "meta": meta,
-                "state": state,
-                "state_std": state_std,
-                "state_mean": state_mean,
-                "state_norm": state_norm,
-                "actions": actions,
-                "state_indicator": state_indicator,
-                "cam_high": cam_high,
-                "cam_high_mask": cam_high_mask,
-                "cam_left_wrist": cam_left_wrist,
-                "cam_left_wrist_mask": cam_left_wrist_mask,
-                "cam_right_wrist": cam_right_wrist,
-                "cam_right_wrist_mask": cam_right_wrist_mask
-            }
+        # Return the resulting sample
+        # For unavailable images, return zero-shape arrays, i.e., (IMG_HISORY_SIZE, 0, 0, 0)
+        # E.g., return np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0)) for the key "cam_left_wrist",
+        # if the left-wrist camera is unavailable on your robot
+        return True, {
+            "meta": meta,
+            "state": state,
+            "state_std": state_std,
+            "state_mean": state_mean,
+            "state_norm": state_norm,
+            "actions": actions,
+            "state_indicator": state_indicator,
+            "cam_high": cam_high,
+            "cam_high_mask": cam_high_mask,
+            "cam_left_wrist": cam_left_wrist,
+            "cam_left_wrist_mask": cam_left_wrist_mask,
+            "cam_right_wrist": cam_right_wrist,
+            "cam_right_wrist_mask": cam_right_wrist_mask
+        }
 
     def parse_hdf5_file_state_only(self, file_path, demo_key):
-        """[Modify] Parse a hdf5 file to generate a state trajectory.
+        """[Modify] Parse a hdf5 file (or cache) to generate a state trajectory.
 
         Args:
             file_path (str): the path to the hdf5 file
@@ -390,81 +435,92 @@ class HDF5LiberoSFTDataset:
                     "action": ndarray,          # action[:], (T, STATE_DIM).
                 } or None if the episode is invalid.
         """
-        with h5py.File(file_path, 'r') as f:
-            # LIBERO dataset structure: data/demo_X/
-            demo = f['data'][demo_key]
-            joint_states = demo['obs']['joint_states'][:]
-            gripper_states = demo['obs']['gripper_states'][:]
-            actions = demo['actions'][:]
+        # 🚀 从缓存或文件读取数据
+        if self.use_cache and file_path in self.cache:
+            # 从内存缓存读取（快速）
+            cached_data = self.cache[file_path]
+            joint_states = cached_data['joint_states']
+            gripper_states = cached_data['gripper_states']
+            actions = cached_data['actions']
             # Concatenate joint states and gripper states 7DoF+2gripper
             qpos = np.concatenate([joint_states, gripper_states], axis=1)
-            num_steps = qpos.shape[0]
-            # [Optional] We drop too-short episode
-            # if num_steps < 128:
-            #     return False, None
+        else:
+            # 从HDF5文件读取（慢速）
+            with h5py.File(file_path, 'r') as f:
+                # LIBERO dataset structure: data/demo_X/
+                demo = f['data'][demo_key]
+                joint_states = demo['obs']['joint_states'][:]
+                gripper_states = demo['obs']['gripper_states'][:]
+                actions = demo['actions'][:]
+                # Concatenate joint states and gripper states 7DoF+2gripper
+                qpos = np.concatenate([joint_states, gripper_states], axis=1)
+        num_steps = qpos.shape[0]
+        # [Optional] We drop too-short episode
+        # if num_steps < 128:
+        #     return False, None
 
-            # [Optional] We skip the first few still steps
-            EPS = 1e-2
-            # Get the idx of the first qpos whose delta exceeds the threshold
-            qpos_delta = np.abs(qpos - qpos[0:1])
-            indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
-            if len(indices) > 0:
-                first_idx = indices[0]
-            else:
-                raise ValueError("Found no qpos that exceeds the threshold.")
+        # [Optional] We skip the first few still steps
+        EPS = 1e-2
+        # Get the idx of the first qpos whose delta exceeds the threshold
+        qpos_delta = np.abs(qpos - qpos[0:1])
+        indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
+        if len(indices) > 0:
+            first_idx = indices[0]
+        else:
+            raise ValueError("Found no qpos that exceeds the threshold.")
 
-            # Max-min normalization for the gripper states
-            qpos_min = -0.04245
-            qpos_max = 0.05185
-            qpos[..., -2:] = (qpos[..., -2:] - qpos_min) / \
-                (qpos_max - qpos_min)
+        # Max-min normalization for the gripper states
+        qpos_min = -0.04245
+        qpos_max = 0.05185
+        qpos[..., -2:] = (qpos[..., -2:] - qpos_min) / \
+            (qpos_max - qpos_min)
 
-            target_qpos = actions
+        target_qpos = actions
 
-            # Parse the state and action
-            state = qpos[first_idx-1:]
-            action = target_qpos[first_idx-1:]
+        # Parse the state and action
+        state = qpos[first_idx-1:]
+        action = target_qpos[first_idx-1:]
 
-            # Fill the state/action into the unified vector
-            def fill_in_state(values):
-                # Target indices corresponding to your state space
-                # In this example: 7 joints + 2 gripper for each arm
-                UNI_STATE_INDICES = [
-                    STATE_VEC_IDX_MAPPING[f"arm_joint_{i}_pos"] for i in range(7)
-                ] + [
-                    STATE_VEC_IDX_MAPPING[f"gripper_joint_{i}_pos"] for i in range(2)
-                ]
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
-                uni_vec[..., UNI_STATE_INDICES] = values
-                return uni_vec
+        # Fill the state/action into the unified vector
+        def fill_in_state(values):
+            # Target indices corresponding to your state space
+            # In this example: 7 joints + 2 gripper for each arm
+            UNI_STATE_INDICES = [
+                STATE_VEC_IDX_MAPPING[f"arm_joint_{i}_pos"] for i in range(7)
+            ] + [
+                STATE_VEC_IDX_MAPPING[f"gripper_joint_{i}_pos"] for i in range(2)
+            ]
+            uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
+            uni_vec[..., UNI_STATE_INDICES] = values
+            return uni_vec
 
-            def fill_in_action(values):
-                UNI_ACTION_INDICES = [
-                    STATE_VEC_IDX_MAPPING["eef_vel_x"],
-                    STATE_VEC_IDX_MAPPING["eef_vel_y"],
-                    STATE_VEC_IDX_MAPPING["eef_vel_z"],
-                    STATE_VEC_IDX_MAPPING["eef_angular_vel_roll"],
-                    STATE_VEC_IDX_MAPPING["eef_angular_vel_pitch"],
-                    STATE_VEC_IDX_MAPPING["eef_angular_vel_yaw"],
-                ] + [
-                    STATE_VEC_IDX_MAPPING["gripper_open"]
-                ]
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
-                uni_vec[..., UNI_ACTION_INDICES] = values
-                return uni_vec
+        def fill_in_action(values):
+            UNI_ACTION_INDICES = [
+                STATE_VEC_IDX_MAPPING["eef_vel_x"],
+                STATE_VEC_IDX_MAPPING["eef_vel_y"],
+                STATE_VEC_IDX_MAPPING["eef_vel_z"],
+                STATE_VEC_IDX_MAPPING["eef_angular_vel_roll"],
+                STATE_VEC_IDX_MAPPING["eef_angular_vel_pitch"],
+                STATE_VEC_IDX_MAPPING["eef_angular_vel_yaw"],
+            ] + [
+                STATE_VEC_IDX_MAPPING["gripper_open"]
+            ]
+            uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
+            uni_vec[..., UNI_ACTION_INDICES] = values
+            return uni_vec
 
-            state = fill_in_state(state)
-            action = fill_in_action(action)
+        state = fill_in_state(state)
+        action = fill_in_action(action)
 
-            # Return the resulting sample
-            return True, {
-                "state": state,
-                "action": action
-            }
+        # Return the resulting sample
+        return True, {
+            "state": state,
+            "action": action
+        }
 
 
 if __name__ == "__main__":
-    ds = HDF5VLADataset()
+    ds = HDF5LiberoSFTDataset()
     for i in range(len(ds)):
         print(f"Processing episode {i}/{len(ds)}...")
         ds.get_item(i)
