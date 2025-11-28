@@ -1,0 +1,30 @@
+open_the_middle_drawer_of_the_cabinet
+  -> open the middle drawer of the cabinet
+
+open_the_top_drawer_and_put_the_bowl_inside
+  -> open the top drawer and put the bowl inside
+
+push_the_plate_to_the_front_of_the_stove
+  -> push the plate to the front of the stove
+
+put_the_bowl_on_the_plate
+  -> put the bowl on the plate
+
+put_the_bowl_on_the_stove
+  -> put the bowl on the stove
+
+put_the_bowl_on_top_of_the_cabinet
+  -> put the bowl on top of the cabinet
+
+put_the_cream_cheese_in_the_bowl
+  -> put the cream cheese in the bowl
+
+put_the_wine_bottle_on_the_rack
+  -> put the wine bottle on the rack
+
+put_the_wine_bottle_on_top_of_the_cabinet
+  -> put the wine bottle on top of the cabinet
+
+turn_on_the_stove
+  -> turn on the stove
+
