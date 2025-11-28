@@ -27,19 +27,23 @@ def parse_args():
     parser.add_argument("--num-traj", type=int, default=25, help="Number of trajectories to test")
     parser.add_argument("--pretrained-path", type=str, required=True, help="Path to pretrained model")
     parser.add_argument("--dataset-name", type=str, default="libero_10", 
-                        choices=["libero_10", "libero_90","libero_spatial","libero_goal","libero_object"], help="Dataset name")
+                        choices=["libero_10", "libero_90", "libero_object", "libero_spatial", "libero_goal"], help="Dataset name")
     # 添加视频参数
     parser.add_argument("--save-videos", action="store_true", help="Save evaluation videos")
     parser.add_argument("--video-dir", type=str, default="outs/videos", help="Directory to save videos")
     # 添加LoRA参数
-    parser.add_argument("--lora-weights", type=str, default=None, 
-                        help="Path to LoRA weights (if using LoRA fine-tuned model)")
+    parser.add_argument("--lora-adapter", "--lora-weights", type=str, default=None, 
+                        dest="lora_adapter",
+                        help="Path to LoRA adapter (if using LoRA fine-tuned model)")
     parser.add_argument(
     "--metrics-path",
     type=str,
     default=None,
     help="评估结果保存的 CSV 路径；如果提供，则每个 task 追加一行"
     )
+    # 添加随机种子参数，保证可复现性
+    parser.add_argument("--seed", type=int, default=20241201, 
+                        help="Random seed for reproducibility")
     args = parser.parse_args()
      # ====== 任务范围约束：根据 dataset_name 检查 task-id ======
     if args.dataset_name == "libero_10":
@@ -135,16 +139,19 @@ def main():
     print(f"[info] Using device: {device}")
     
     # 基础随机种子（每个 episode 会在此基础上加偏移）
-    base_seed = 20241201
+    base_seed = args.seed
     set_global_seeds(base_seed)
+    print(f"[info] Random seed: {base_seed}")
     
     pretrained_text_encoder_name_or_path = "google/t5-v1_1-xxl"
     pretrained_vision_encoder_name_or_path = "google/siglip-so400m-patch14-384"
     
+    # 加载模型（支持 LoRA）
     policy = create_model(
         args=config, 
         dtype=torch.bfloat16,
         pretrained=args.pretrained_path,
+        lora_adapter_path=args.lora_adapter,
         pretrained_text_encoder_name_or_path=pretrained_text_encoder_name_or_path,
         pretrained_vision_encoder_name_or_path=pretrained_vision_encoder_name_or_path,
     )

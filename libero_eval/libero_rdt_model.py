@@ -30,31 +30,41 @@ LIBERO_ACTION_INDICES = [
 ]
 
 
-def create_model(args, pretrained, **kwargs):
+def create_model(args, pretrained, lora_adapter_path=None, **kwargs):
+    """
+    创建 RDT 模型，支持加载 LoRA checkpoint
+    
+    Args:
+        args: 模型配置
+        pretrained: 预训练模型路径（base model）
+        lora_adapter_path: LoRA adapter 路径（可选）
+    """
     model = RoboticDiffusionTransformerModel(args, **kwargs)
-    if pretrained is not None:
+    
+    # 加载模型权重
+    if lora_adapter_path is not None:
+        # 单独提供了 base model 和 LoRA adapter
+        print(f"[info] Loading base model: {pretrained}")
         model.load_pretrained_weights(pretrained)
-
+        
+        print(f"[info] Loading LoRA adapter: {lora_adapter_path}")
+        from peft import PeftModel
+        model.policy = PeftModel.from_pretrained(
+            model.policy,
+            lora_adapter_path,
+            is_trainable=False
+        )
+        print("[info] Merging LoRA weights...")
+        model.policy = model.policy.merge_and_unload()
+        print("  ✓ LoRA weights merged successfully")
+        
+    else:
+        # 完整 checkpoint，直接加载
+        if pretrained is not None:
+            print(f"[info] Loading full checkpoint: {pretrained}")
+            model.load_pretrained_weights(pretrained)
+    
     return model
-
-# LoRA 相关代码 到时候测试
-# def create_model(args, pretrained, lora_weights_path=None, **kwargs):
-#     model = RoboticDiffusionTransformerModel(args, **kwargs)
-#     if pretrained is not None:
-#         model.load_pretrained_weights(pretrained)
-    
-#     # 如果提供了LoRA权重，加载它们
-#     if lora_weights_path is not None:
-#         from peft import PeftModel
-#         print(f"Loading LoRA weights from {lora_weights_path}")
-#         model.policy = PeftModel.from_pretrained(
-#             model.policy, 
-#             lora_weights_path,
-#             is_trainable=False
-#         )
-#         print("LoRA weights loaded successfully")
-    
-#     return model
 
 class RoboticDiffusionTransformerModel(object):
     """A wrapper for the RDT model, which handles
