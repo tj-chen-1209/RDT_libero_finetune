@@ -203,6 +203,10 @@ def train(args, logger):
             )
             
             rdt = get_peft_model(rdt, lora_config)
+            # 确保 LoRA 参数与混合精度训练的 dtype 一致
+            # 这很重要，因为新增的 LoRA 参数默认是 float32
+            rdt = rdt.to(dtype=weight_dtype)
+            logger.info(f"✅ LoRA parameters converted to {weight_dtype}")
             rdt.print_trainable_parameters()
             logger.info(f"LoRA enabled: rank={args.lora_rank}, alpha={args.lora_alpha}, "
                        f"target_modules={args.lora_target_modules}")
