@@ -6,7 +6,7 @@ export NCCL_DEBUG=INFO
 export NCCL_NVLS_ENABLE=0
 export DS_BUILD_EVOFORMER_ATTN=0
 # export CUDA_VISIBLE_DEVICES="1,2,3,4,5,6,7"
-# export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=0
 export TEXT_ENCODER_NAME="google/t5-v1_1-xxl"
 export VISION_ENCODER_NAME="google/siglip-so400m-patch14-384"
 dataset_name="libero_spatial"
@@ -57,12 +57,14 @@ fi
 # --use_8bit_adam \
 # deepspeed main.py \
 # deepspeed --hostfile=hostfile.txt main_sft.py \
-deepspeed --exclude="localhost:0" main_sft.py \
+# deepspeed --exclude="localhost:0" main_sft.py \
+deepspeed --include="localhost:0,1,2,3,4,5,6,7" main_sft.py \
     --deepspeed="./configs/zero2.json" \
+    --pretrained_model_name_or_path=$BASE_MODEL_PATH \
     --pretrained_text_encoder_name_or_path=$TEXT_ENCODER_NAME \
     --pretrained_vision_encoder_name_or_path=$VISION_ENCODER_NAME \
     --output_dir=$OUTPUT_DIR \
-    --train_batch_size=32 \
+    --train_batch_size=48 \
     --sample_batch_size=32 \
     --num_sample_batches=4 \
     --max_train_steps=200000 \
